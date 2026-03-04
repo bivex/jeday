@@ -1,0 +1,28 @@
+services:
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol.yaml", "--feature-gates=service.profilesSupport"]
+    volumes:
+      - ./otelcol.yaml:/etc/otelcol.yaml
+    networks:
+      - auth_network
+
+  profiler:
+    image: alpine:latest
+    privileged: true
+    pid: host
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug
+      - /lib/modules:/lib/modules:ro
+      - /usr/src:/usr/src:ro
+      - ./ebpf-profiler/ebpf-profiler:/app/ebpf-profiler
+    command: ["/app/ebpf-profiler", "-collection-agent=otelcol:4317", "-disable-tls", "-v", "-samples-per-second=100"]
+    networks:
+      - auth_network
+    depends_on:
+      - otelcol
+
+networks:
+  auth_network:
+    external: true
+    name: jeday_auth_network
