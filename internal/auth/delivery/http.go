@@ -42,14 +42,19 @@ func (h *AuthHandler) AuthMiddleware(ctx *atreugo.RequestCtx) error {
 }
 
 func (h *AuthHandler) RegisterRoutes(server *atreugo.Atreugo) {
-	server.UseBefore(LoggerMiddleware)
+	// Public group without logging (for maximum speed on register)
+	publicFast := server.NewGroupPath("/auth")
+	publicFast.POST("/register", h.Register)
 
-	authGroup := server.NewGroupPath("/auth")
-	authGroup.POST("/register", h.Register)
-	authGroup.POST("/login", h.Login)
-	authGroup.POST("/refresh", h.Refresh)
+	// Regular public group with logging
+	public := server.NewGroupPath("/auth")
+	public.UseBefore(LoggerMiddleware)
+	public.POST("/login", h.Login)
+	public.POST("/refresh", h.Refresh)
 
+	// Protected group with logging and auth
 	protected := server.NewGroupPath("/auth")
+	protected.UseBefore(LoggerMiddleware)
 	protected.UseBefore(h.AuthMiddleware)
 	protected.POST("/logout", h.Logout)
 	protected.GET("/me", h.GetMe)
@@ -67,8 +72,9 @@ func (h *AuthHandler) Register(ctx *atreugo.RequestCtx) error {
 		return ctx.ErrorResponse(err, http.StatusBadRequest)
 	}
 
-	user, err := h.authService.RegisterUser(context.Background(), req.Email, req.Username, req.Password)
+	user, err := h.authService.RegisterUser(ctx, req.Email, req.Username, req.Password)
 	if err != nil {
+		ctx.Logger().Printf("Register error: %v", err)
 		return ctx.ErrorResponse(err, http.StatusInternalServerError)
 	}
 

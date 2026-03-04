@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"os"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -37,6 +38,10 @@ func LoggerMiddleware(ctx *atreugo.RequestCtx) error {
 
 func InitLogger() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	// In development, you might want pretty logging:
-	// log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	levelStr := os.Getenv("LOG_LEVEL")
+	level, err := zerolog.ParseLevel(levelStr)
+	if err != nil {
+		level = zerolog.InfoLevel
+	}
+	zerolog.SetGlobalLevel(level)
 }

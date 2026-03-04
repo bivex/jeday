@@ -20,6 +20,7 @@ import (
 )
 
 func main() {
+	delivery.InitLogger()
 	// 1. Load configuration
 	cfg, err := config.Load(".")
 	if err != nil {
@@ -42,7 +43,7 @@ func main() {
 	// 4. Initialize Atreugo Server
 	server := atreugo.New(atreugo.Config{
 		Addr:    cfg.ServerAddress,
-		Prefork: true,
+		Prefork: false,
 	})
 
 	// Start pprof server
