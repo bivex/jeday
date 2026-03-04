@@ -35,6 +35,19 @@ type AuthService interface {
 type authService struct {
 	repo       repository.Repository
 	tokenMaker token.Maker
+	regCh      chan *regIn
+}
+
+type regIn struct {
+	email    string
+	username string
+	fastHash string
+	res      chan *regOut
+}
+
+type regOut struct {
+	user *db.User
+	err  error
 }
 
 func NewAuthService(repo repository.Repository, tokenKey string) AuthService {
@@ -43,39 +56,104 @@ func NewAuthService(repo repository.Repository, tokenKey string) AuthService {
 		panic("invalid token key")
 	}
 
-	return &authService{
+	s := &authService{
 		repo:       repo,
 		tokenMaker: tokenMaker,
+		regCh:      make(chan *regIn, 5000),
 	}
+
+	go s.runRegistrationBatcher()
+
+	return s
 }
 
 func (s *authService) RegisterUser(ctx context.Context, email, username, password string) (*db.User, error) {
-	// MAX SPEED: Use FastHash (SHA256) instead of Argon2 during registration
-	weakHash := token.FastHash(password)
-
-	var user db.User
-	err := s.repo.ExecTx(ctx, func(q *db.Queries) error {
-		var err error
-		user, err = q.CreateUser(ctx, db.CreateUserParams{
-			Email:    email,
-			Username: username,
-		})
-		if err != nil {
-			return err
-		}
-
-		_, err = q.CreateUserWeakPassword(ctx, db.CreateUserWeakPasswordParams{
-			UserID:           user.ID,
-			WeakPasswordHash: pgtype.Text{String: weakHash, Valid: true},
-		})
-		return err
-	})
-
-	if err != nil {
-		return nil, err
+	fastHash := token.FastHash(password)
+	resCh := make(chan *regOut, 1)
+	req := &regIn{
+		email:    email,
+		username: username,
+		fastHash: fastHash,
+		res:      resCh,
 	}
 
-	return &user, nil
+	select {
+	case s.regCh <- req:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	select {
+	case res := <-resCh:
+		return res.user, res.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *authService) runRegistrationBatcher() {
+	const batchSize = 100
+	const maxWait = 10 * time.Millisecond
+
+	batch := make([]*regIn, 0, batchSize)
+	timer := time.NewTimer(maxWait)
+	if !timer.Stop() {
+		<-timer.C
+	}
+
+	for {
+		select {
+		case req := <-s.regCh:
+			if len(batch) == 0 {
+				timer.Reset(maxWait)
+			}
+			batch = append(batch, req)
+			if len(batch) >= batchSize {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				s.processBatch(batch)
+				batch = make([]*regIn, 0, batchSize)
+			}
+		case <-timer.C:
+			if len(batch) > 0 {
+				s.processBatch(batch)
+				batch = make([]*regIn, 0, batchSize)
+			}
+		}
+	}
+}
+
+func (s *authService) processBatch(batch []*regIn) {
+	usersParams := make([]db.CreateUserParams, len(batch))
+	passwords := make([]string, len(batch))
+
+	for i, req := range batch {
+		usersParams[i] = db.CreateUserParams{
+			Email:    req.email,
+			Username: req.username,
+		}
+		passwords[i] = req.fastHash
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createdUsers, err := s.repo.CreateUsersBatch(ctx, usersParams, passwords)
+
+	if err != nil {
+		for _, req := range batch {
+			req.res <- &regOut{err: err}
+		}
+		return
+	}
+
+	for i, user := range createdUsers {
+		batch[i].res <- &regOut{user: &user}
+	}
 }
 
 func (s *authService) LoginUser(ctx context.Context, email, password string, userAgent, ipAddress string) (string, string, error) {
