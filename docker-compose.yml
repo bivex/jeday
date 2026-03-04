@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./auth-api"]
+    ports:
+      - "8080:8080"
+      - "6060:6060"
+    environment:
+      - DB_URL=postgresql://app_user:secret@db:5432/auth_db?sslmode=disable
+      - SERVER_ADDRESS=0.0.0.0:8080
+      - TOKEN_SYMMETRIC_KEY=12345678901234567890123456789012
+    depends_on:
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    networks:
+      - auth_network
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: auth_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_user -d auth_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - auth_network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - auth_network
+
+  migrations:
+    image: migrate/migrate
+    volumes:
+      - ./migrations:/migrations
+    command: -path=/migrations -database="postgresql://app_user:secret@db:5432/auth_db?sslmode=disable" up
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - auth_network
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./auth-worker"]
+    environment:
+      - DB_URL=postgresql://app_user:secret@db:5432/auth_db?sslmode=disable
+      - TOKEN_SYMMETRIC_KEY=12345678901234567890123456789012
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - auth_network
+
+  k6:
+    image: grafana/k6
+    volumes:
+      - ./load-test.js:/load-test.js
+    command: run /load-test.js
+    depends_on:
+      app:
+        condition: service_started
+    networks:
+      - auth_network
+
+volumes:
+  pgdata:
+
+networks:
+  auth_network:
+    driver: bridge
