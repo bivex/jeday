@@ -36,7 +36,7 @@ func main() {
 
 	log.Println("Password Hardening Worker started...")
 
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(cfg.WorkerInterval)
 	defer ticker.Stop()
 
 	for {
@@ -45,7 +45,7 @@ func main() {
 			log.Println("Worker shutting down...")
 			return
 		case <-ticker.C:
-			count, err := authService.UpgradePasswords(ctx, 10)
+			count, err := authService.UpgradePasswords(ctx, cfg.WorkerUpgradeLimit)
 			if err != nil {
 				log.Printf("Error upgrading passwords: %v", err)
 				continue

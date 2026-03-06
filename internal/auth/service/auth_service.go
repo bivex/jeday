@@ -32,10 +32,17 @@ type AuthService interface {
 	UpgradePasswords(ctx context.Context, limit int32) (int, error)
 }
 
+type Options struct {
+	RegistrationBatchSize int
+	RegistrationBatchWait time.Duration
+}
+
 type authService struct {
-	repo       repository.Repository
-	tokenMaker token.Maker
-	regCh      chan *regIn
+	repo         repository.Repository
+	tokenMaker   token.Maker
+	regCh        chan *regIn
+	regBatchSize int
+	regBatchWait time.Duration
 }
 
 type regIn struct {
@@ -50,16 +57,31 @@ type regOut struct {
 	err  error
 }
 
-func NewAuthService(repo repository.Repository, tokenKey string) AuthService {
+func NewAuthService(repo repository.Repository, tokenKey string, opts ...Options) AuthService {
 	tokenMaker, err := token.NewPasetoMaker(tokenKey)
 	if err != nil {
 		panic("invalid token key")
 	}
 
+	options := Options{
+		RegistrationBatchSize: 100,
+		RegistrationBatchWait: 10 * time.Millisecond,
+	}
+	if len(opts) > 0 {
+		if opts[0].RegistrationBatchSize > 0 {
+			options.RegistrationBatchSize = opts[0].RegistrationBatchSize
+		}
+		if opts[0].RegistrationBatchWait > 0 {
+			options.RegistrationBatchWait = opts[0].RegistrationBatchWait
+		}
+	}
+
 	s := &authService{
-		repo:       repo,
-		tokenMaker: tokenMaker,
-		regCh:      make(chan *regIn, 5000),
+		repo:         repo,
+		tokenMaker:   tokenMaker,
+		regCh:        make(chan *regIn, 5000),
+		regBatchSize: options.RegistrationBatchSize,
+		regBatchWait: options.RegistrationBatchWait,
 	}
 
 	go s.runRegistrationBatcher()
@@ -92,11 +114,8 @@ func (s *authService) RegisterUser(ctx context.Context, email, username, passwor
 }
 
 func (s *authService) runRegistrationBatcher() {
-	const batchSize = 100
-	const maxWait = 10 * time.Millisecond
-
-	batch := make([]*regIn, 0, batchSize)
-	timer := time.NewTimer(maxWait)
+	batch := make([]*regIn, 0, s.regBatchSize)
+	timer := time.NewTimer(s.regBatchWait)
 	if !timer.Stop() {
 		<-timer.C
 	}
@@ -105,10 +124,10 @@ func (s *authService) runRegistrationBatcher() {
 		select {
 		case req := <-s.regCh:
 			if len(batch) == 0 {
-				timer.Reset(maxWait)
+				timer.Reset(s.regBatchWait)
 			}
 			batch = append(batch, req)
-			if len(batch) >= batchSize {
+			if len(batch) >= s.regBatchSize {
 				if !timer.Stop() {
 					select {
 					case <-timer.C:
@@ -116,12 +135,12 @@ func (s *authService) runRegistrationBatcher() {
 					}
 				}
 				s.processBatch(batch)
-				batch = make([]*regIn, 0, batchSize)
+				batch = make([]*regIn, 0, s.regBatchSize)
 			}
 		case <-timer.C:
 			if len(batch) > 0 {
 				s.processBatch(batch)
-				batch = make([]*regIn, 0, batchSize)
+				batch = make([]*regIn, 0, s.regBatchSize)
 			}
 		}
 	}

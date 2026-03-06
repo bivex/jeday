@@ -38,12 +38,15 @@ func main() {
 	// 3. Initialize layers
 	queries := db.New(pool)
 	authRepo := repository.NewPostgresRepository(queries, pool)
-	authService := service.NewAuthService(authRepo, cfg.TokenSymmetricKey)
+	authService := service.NewAuthService(authRepo, cfg.TokenSymmetricKey, service.Options{
+		RegistrationBatchSize: cfg.RegistrationBatchSize,
+		RegistrationBatchWait: cfg.RegistrationBatchWait,
+	})
 
 	// 4. Initialize Atreugo Server
 	server := atreugo.New(atreugo.Config{
 		Addr:    cfg.ServerAddress,
-		Prefork: false,
+		Prefork: cfg.ServerPrefork,
 	})
 
 	// Start pprof server

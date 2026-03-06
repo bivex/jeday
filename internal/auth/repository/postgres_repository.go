@@ -4,10 +4,29 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jeday/auth/internal/db"
 )
+
+const createUsersBulk = `
+WITH input AS (
+	SELECT email, username, ord::int
+	FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS t(email, username, ord)
+), inserted AS (
+	INSERT INTO users (email, username)
+	SELECT email, username
+	FROM input
+	ORDER BY ord
+	RETURNING id, email, username, status, created_at, updated_at
+)
+SELECT inserted.id, inserted.email, inserted.username, inserted.status, inserted.created_at, inserted.updated_at, input.ord
+FROM inserted
+JOIN input
+	ON inserted.email = input.email AND inserted.username = input.username
+ORDER BY input.ord
+`
 
 // Repository defines all functions to execute db queries and transactions
 type Repository interface {
@@ -51,29 +70,60 @@ func (r *PostgresRepository) ExecTx(ctx context.Context, fn func(*db.Queries) er
 }
 
 func (r *PostgresRepository) CreateUsersBatch(ctx context.Context, users []db.CreateUserParams, passwords []string) ([]db.User, error) {
+	if len(users) == 0 {
+		return nil, nil
+	}
+	if len(users) != len(passwords) {
+		return nil, fmt.Errorf("users/passwords batch length mismatch: %d != %d", len(users), len(passwords))
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
-	q := db.New(tx)
-	createdUsers := make([]db.User, 0, len(users))
+	emails, usernames := splitBatchUsers(users)
+	rows, err := tx.Query(ctx, createUsersBulk, emails, usernames)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-	for i, userParam := range users {
-		user, err := q.CreateUser(ctx, userParam)
-		if err != nil {
+	createdUsers := make([]db.User, len(users))
+	createdCount := 0
+	for rows.Next() {
+		var user db.User
+		var ord int
+		if err := rows.Scan(&user.ID, &user.Email, &user.Username, &user.Status, &user.CreatedAt, &user.UpdatedAt, &ord); err != nil {
 			return nil, err
 		}
 
-		_, err = q.CreateUserWeakPassword(ctx, db.CreateUserWeakPasswordParams{
-			UserID:           user.ID,
-			WeakPasswordHash: pgtype.Text{String: passwords[i], Valid: true},
-		})
-		if err != nil {
-			return nil, err
+		if ord < 1 || ord > len(users) {
+			return nil, fmt.Errorf("bulk insert returned invalid ordinality %d", ord)
 		}
-		createdUsers = append(createdUsers, user)
+
+		createdUsers[ord-1] = user
+		createdCount++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if createdCount != len(users) {
+		return nil, fmt.Errorf("bulk insert created %d users, expected %d", createdCount, len(users))
+	}
+
+	insertedPasswords, err := tx.CopyFrom(
+		ctx,
+		pgx.Identifier{"user_passwords"},
+		[]string{"user_id", "weak_password_hash"},
+		pgx.CopyFromRows(buildWeakPasswordRows(createdUsers, passwords)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if insertedPasswords != int64(len(passwords)) {
+		return nil, fmt.Errorf("bulk insert created %d user_password rows, expected %d", insertedPasswords, len(passwords))
 	}
 
 	err = tx.Commit(ctx)
@@ -82,4 +132,27 @@ func (r *PostgresRepository) CreateUsersBatch(ctx context.Context, users []db.Cr
 	}
 
 	return createdUsers, nil
+}
+
+func splitBatchUsers(users []db.CreateUserParams) ([]string, []string) {
+	emails := make([]string, len(users))
+	usernames := make([]string, len(users))
+	for i, user := range users {
+		emails[i] = user.Email
+		usernames[i] = user.Username
+	}
+
+	return emails, usernames
+}
+
+func buildWeakPasswordRows(users []db.User, passwords []string) [][]any {
+	rows := make([][]any, len(users))
+	for i := range users {
+		rows[i] = []any{
+			users[i].ID,
+			pgtype.Text{String: passwords[i], Valid: true},
+		}
+	}
+
+	return rows
 }

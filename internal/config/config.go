@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -10,10 +11,15 @@ import (
 // Config stores all configuration of the application.
 // The values are read by godotenv from a .env file or environment variables.
 type Config struct {
-	DBSource            string
-	ServerAddress       string
-	TokenSymmetricKey   string
-	AccessTokenDuration time.Duration
+	DBSource              string
+	ServerAddress         string
+	ServerPrefork         bool
+	TokenSymmetricKey     string
+	AccessTokenDuration   time.Duration
+	RegistrationBatchSize int
+	RegistrationBatchWait time.Duration
+	WorkerInterval        time.Duration
+	WorkerUpgradeLimit    int32
 }
 
 // Load reads configuration from file or environment variables.
@@ -30,6 +36,8 @@ func Load(path string) (config Config, err error) {
 		config.ServerAddress = "0.0.0.0:8080"
 	}
 
+	config.ServerPrefork = parseBoolEnv("SERVER_PREFORK", false)
+
 	config.TokenSymmetricKey = os.Getenv("TOKEN_SYMMETRIC_KEY")
 	if config.TokenSymmetricKey == "" {
 		config.TokenSymmetricKey = "12345678901234567890123456789012"
@@ -41,5 +49,52 @@ func Load(path string) (config Config, err error) {
 	}
 	config.AccessTokenDuration, _ = time.ParseDuration(durStr)
 
+	config.RegistrationBatchSize = parseIntEnv("REGISTRATION_BATCH_SIZE", 100)
+	config.RegistrationBatchWait = parseDurationEnv("REGISTRATION_BATCH_WAIT", 10*time.Millisecond)
+	config.WorkerInterval = parseDurationEnv("WORKER_INTERVAL", 2*time.Second)
+	config.WorkerUpgradeLimit = int32(parseIntEnv("WORKER_UPGRADE_LIMIT", 10))
+
 	return
+}
+
+func parseBoolEnv(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func parseDurationEnv(key string, fallback time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func parseIntEnv(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
 }

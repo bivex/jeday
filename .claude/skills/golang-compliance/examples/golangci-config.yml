@@ -1,0 +1,50 @@
+run:
+  timeout: 5m
+  go: "1.22"
+  tests: true
+  build-tags: []
+
+linters:
+  enable:
+    - govet         # официальный анализатор Go (обязателен)
+    - staticcheck   # глубокий анализ корректности
+    - errcheck      # необработанные ошибки
+    - gosimple      # упрощения кода
+    - ineffassign   # неэффективные присваивания
+    - unused        # неиспользуемый экспортируемый код
+    - gocyclo       # цикломатическая сложность
+    - misspell      # опечатки в комментариях и строках
+    - revive        # стиль кода (замена golint)
+    - gofmt         # форматирование (должен быть последним)
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15   # предупреждать при сложности > 15
+
+  errcheck:
+    check-type-assertions: true   # проверять .(Type) без ok
+    check-blank: true             # проверять _ = f()
+
+  revive:
+    rules:
+      - name: exported
+      - name: var-naming
+      - name: package-comments
+
+  staticcheck:
+    go: "1.22"
+    checks:
+      - "all"
+      - "-ST1000"   # игнорировать отсутствие комментария к пакету в main
+
+issues:
+  # Не проверять ошибки в тестах (нормальная практика)
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - errcheck
+        - revive
+
+  # Максимальное количество проблем одного типа (0 = без лимита)
+  max-same-issues: 0
+  max-issues-per-linter: 0
