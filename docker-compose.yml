@@ -10,10 +10,12 @@ services:
       - "8080:8080"
       - "6060:6060"
     environment:
-      - DB_URL=postgresql://app_user:secret@pgbouncer:6432/auth_db?sslmode=disable&pool_max_conns=500
+      - DB_URL=postgresql://app_user:secret@pgbouncer:6432/auth_db?sslmode=disable&pool_max_conns=${APP_DB_POOL_MAX_CONNS:-128}
       - SERVER_ADDRESS=0.0.0.0:8080
-      - SERVER_PREFORK=true
+      - SERVER_PREFORK=${SERVER_PREFORK:-true}
       - TOKEN_SYMMETRIC_KEY=12345678901234567890123456789012
+      - REGISTRATION_BATCH_SIZE=${REGISTRATION_BATCH_SIZE:-100}
+      - REGISTRATION_BATCH_WAIT=${REGISTRATION_BATCH_WAIT:-10ms}
       - LOG_LEVEL=warn
     ulimits:
       nofile:
@@ -96,12 +98,12 @@ services:
       dockerfile: Dockerfile
     command: ["./auth-worker"]
     environment:
-      - DB_URL=postgresql://app_user:secret@pgbouncer:6432/auth_db?sslmode=disable&pool_max_conns=4
+      - DB_URL=postgresql://app_user:secret@pgbouncer:6432/auth_db?sslmode=disable&pool_max_conns=${WORKER_DB_POOL_MAX_CONNS:-4}
       - TOKEN_SYMMETRIC_KEY=12345678901234567890123456789012
-      - GOMAXPROCS=1
-      - GOMEMLIMIT=256MiB
-      - WORKER_INTERVAL=5s
-      - WORKER_UPGRADE_LIMIT=4
+      - GOMAXPROCS=${WORKER_GOMAXPROCS:-1}
+      - GOMEMLIMIT=${WORKER_GOMEMLIMIT:-256MiB}
+      - WORKER_INTERVAL=${WORKER_INTERVAL:-5s}
+      - WORKER_UPGRADE_LIMIT=${WORKER_UPGRADE_LIMIT:-4}
     depends_on:
       db:
         condition: service_healthy

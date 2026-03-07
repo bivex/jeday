@@ -4,7 +4,7 @@ High-performance, secure authentication service built with Go, following the **J
 
 ## 🌟 Key Features
 
-- **Blazing Fast Registration**: Current local registration-only benchmark reaches **~34k RPS** on a clean Docker Compose stack.
+- **Blazing Fast Registration**: Best recent local registration-only benchmark reached **~41k RPS**; the tuned default profile consistently beats the old 500-connection API pool.
 - **Asynchronous Password Hardening**: Background workers upgrade weak hashes to **Argon2id** (OWASP recommended) without affecting user-facing latency.
 - **High-Performance Web Framework**: Powered by **Atreugo** (fasthttp-based) with **Prefork** mode enabled.
 - **Hot Path Optimized for Writes**: Registration uses real bulk insert into `users` plus queue enqueue into `password_upgrade_queue`.
@@ -66,10 +66,13 @@ Recent measured results on local Docker Compose runs:
 | Before the hot-path fixes (worker contending with API) | ~3,875.8/s | n/a | n/a |
 | Clean-slate optimized stack | **34,023.7/s** | **14.56ms** | **21.89ms** |
 | After dropping DB-level `username` uniqueness | **34,557.6/s** | **14.32ms** | **20.67ms** |
+| After `CopyFrom(users)` plus tuned API DB pool (`pool_max_conns=128`) | **41,227.2/s** | **11.87ms** | **22.41ms** |
 | Same setup under eBPF profiling | **31,975.0/s** | **15.38ms** | **24.75ms** |
 
 Notes:
 - Numbers above are from registration-only `k6` runs (`500 VUs`, `20s`) against the local Docker Compose stack.
+- Current tuned default for the API path is `APP_DB_POOL_MAX_CONNS=128`; larger defaults like `500` reduced throughput noticeably in the tuning sweep.
+- A later confirmatory A/B still kept `128` ahead of `500` (`35,885.0/s` vs `33,456.5/s`), even though absolute numbers varied between runs.
 - `email` remains unique and is used for login lookup.
 - `username` is **currently not unique at the DB level**; removing `users_username_key` reduced write cost on the registration path.
 

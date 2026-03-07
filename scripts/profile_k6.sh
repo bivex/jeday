@@ -82,10 +82,28 @@ collect_otel_samples() {
   } > "$RUN_DIR/otel-sample-counts.txt"
 }
 
+write_tuning_snapshot() {
+  cat > "$RUN_DIR/tunables.env" <<EOF
+SERVER_PREFORK=${SERVER_PREFORK:-true}
+APP_DB_POOL_MAX_CONNS=${APP_DB_POOL_MAX_CONNS:-128}
+REGISTRATION_BATCH_SIZE=${REGISTRATION_BATCH_SIZE:-100}
+REGISTRATION_BATCH_WAIT=${REGISTRATION_BATCH_WAIT:-10ms}
+WORKER_DB_POOL_MAX_CONNS=${WORKER_DB_POOL_MAX_CONNS:-4}
+WORKER_GOMAXPROCS=${WORKER_GOMAXPROCS:-1}
+WORKER_GOMEMLIMIT=${WORKER_GOMEMLIMIT:-256MiB}
+WORKER_INTERVAL=${WORKER_INTERVAL:-5s}
+WORKER_UPGRADE_LIMIT=${WORKER_UPGRADE_LIMIT:-4}
+VUS=$VUS
+DURATION=$DURATION
+LOAD_SCRIPT=$LOAD_SCRIPT
+EOF
+}
+
 run_profile() {
   mkdir -p "$RUN_DIR"
 
   echo "==> Starting app stack"
+  write_tuning_snapshot
   compose up --build -d
   wait_for_health
 
@@ -109,6 +127,8 @@ run_profile() {
 
   {
     echo "Run directory: $RUN_DIR"
+    echo "Tunables:"
+    cat "$RUN_DIR/tunables.env"
     echo
     echo "k6 summary:"
     grep -E 'http_req_duration|http_reqs|checks_failed|checks_succeeded|running \(20|TOTAL RESULTS' "$RUN_DIR/k6.txt" || true
