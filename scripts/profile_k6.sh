@@ -96,6 +96,7 @@ collect_pg_stats() {
     psql -U app_user -d auth_db -c \
     "SELECT datname, xact_commit, tup_inserted, blks_read, blks_hit FROM pg_stat_database WHERE datname='auth_db'; \
      SELECT wal_records, wal_bytes FROM pg_stat_wal; \
+     SELECT checkpoints_timed, checkpoints_req, checkpoint_write_time, checkpoint_sync_time, buffers_checkpoint, buffers_clean, maxwritten_clean FROM pg_stat_bgwriter; \
      SELECT relname, idx_scan, n_tup_ins, n_live_tup, n_dead_tup FROM pg_stat_user_tables WHERE relname IN ('users','password_upgrade_queue','user_passwords') ORDER BY relname;" \
     > "$RUN_DIR/${phase}-pg-stats.txt"
 }
@@ -137,6 +138,9 @@ POSTGRES_SHARED_BUFFERS=${POSTGRES_SHARED_BUFFERS:-512MB}
 POSTGRES_SYNCHRONOUS_COMMIT=${POSTGRES_SYNCHRONOUS_COMMIT:-off}
 POSTGRES_FULL_PAGE_WRITES=${POSTGRES_FULL_PAGE_WRITES:-off}
 POSTGRES_CHECKPOINT_TIMEOUT=${POSTGRES_CHECKPOINT_TIMEOUT:-15min}
+POSTGRES_CHECKPOINT_COMPLETION_TARGET=${POSTGRES_CHECKPOINT_COMPLETION_TARGET:-0.95}
+POSTGRES_WAL_BUFFERS=${POSTGRES_WAL_BUFFERS:-64MB}
+POSTGRES_EFFECTIVE_IO_CONCURRENCY=${POSTGRES_EFFECTIVE_IO_CONCURRENCY:-32}
 VUS=$VUS
 DURATION=$DURATION
 LOAD_SCRIPT=$LOAD_SCRIPT

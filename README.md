@@ -67,6 +67,9 @@ docker compose run --rm -v $(pwd)/load-test-reg-only.js:/load-test.js k6 run --v
 - `POSTGRES_MAX_CONNECTIONS=256`
 - `POSTGRES_SHARED_BUFFERS=512MB`
 - `POSTGRES_CHECKPOINT_TIMEOUT=15min`
+- `POSTGRES_CHECKPOINT_COMPLETION_TARGET=0.95`
+- `POSTGRES_WAL_BUFFERS=64MB`
+- `POSTGRES_EFFECTIVE_IO_CONCURRENCY=32`
 - `PGBOUNCER_DEFAULT_POOL_SIZE=100`
 - `REGISTRATION_BATCH_SIZE=100`
 - `REGISTRATION_BATCH_WAIT=10ms`
@@ -83,7 +86,7 @@ Recent measured results on local Docker Compose runs:
 | After dropping DB-level `username` uniqueness | **34,557.6/s** | **14.32ms** | **20.67ms** |
 | Best measured sweep peak after `CopyFrom(users)` plus tuned API DB pool (`pool_max_conns=128`) | **41,227.2/s** | **11.87ms** | **22.41ms** |
 | After reducing Postgres `max_connections` to `256` (with API pool `128`) | **35,156.0/s** | **14.05ms** | **20.53ms** |
-| Current tuned defaults, confirmatory `full` run | **34,744.1/s** | **14.21ms** | **21.57ms** |
+| Current tuned defaults incl. heavy Postgres combo, confirmatory `full` run | **35,170.0/s** | **14.03ms** | **20.89ms** |
 | Same setup under eBPF profiling | **31,975.0/s** | **15.38ms** | **24.75ms** |
 
 Notes:
@@ -92,6 +95,7 @@ Notes:
 - A later confirmatory A/B still kept `128` ahead of `500` (`35,885.0/s` vs `33,456.5/s`), even though absolute numbers varied between runs.
 - Current tuned Postgres default is `POSTGRES_MAX_CONNECTIONS=256`; in isolated A/B it beat the previous `1000` setting (`35,156.0/s` vs `34,339.9/s`).
 - Additional `shared_buffers` / `checkpoint_timeout` experiments did **not** beat the current baseline, so defaults remain `512MB` and `15min`.
+- Heavy Postgres frontier tuning was fixed to `checkpoint_completion_target=0.95`, `wal_buffers=64MB`, and `effective_io_concurrency=32`; confirmatory A/B showed a repeatable gain over the prior baseline, though local Docker Desktop runs still show visible variance.
 - `email` remains unique and is used for login lookup.
 - `username` is **currently not unique at the DB level**; removing `users_username_key` reduced write cost on the registration path.
 
