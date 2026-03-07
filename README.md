@@ -4,7 +4,7 @@ High-performance, secure authentication service built with Go, following the **J
 
 ## 🌟 Key Features
 
-- **Blazing Fast Registration**: Best recent local registration-only benchmark reached **~41k RPS**; the tuned default profile consistently beats the old 500-connection API pool.
+- **Blazing Fast Registration**: Best recent local registration-only benchmark reached **~41k RPS**; the current tuned defaults deliver stable mid-30k RPS on full reset-and-profile runs.
 - **Asynchronous Password Hardening**: Background workers upgrade weak hashes to **Argon2id** (OWASP recommended) without affecting user-facing latency.
 - **High-Performance Web Framework**: Powered by **Atreugo** (fasthttp-based) with **Prefork** mode enabled.
 - **Hot Path Optimized for Writes**: Registration uses real bulk insert into `users` plus queue enqueue into `password_upgrade_queue`.
@@ -55,7 +55,22 @@ curl -sf http://localhost:8080/health
 
 # Registration stress test used in recent profiling runs
 docker compose run --rm -v $(pwd)/load-test-reg-only.js:/load-test.js k6 run --vus 500 --duration 20s /load-test.js
+
+# One-shot reset + rebuild + eBPF/k6 profile run with artifacts
+./scripts/profile_k6.sh full
 ```
+
+## ⚙️ Current Tuned Defaults
+
+- `SERVER_PREFORK=true`
+- `APP_DB_POOL_MAX_CONNS=128`
+- `POSTGRES_MAX_CONNECTIONS=256`
+- `POSTGRES_SHARED_BUFFERS=512MB`
+- `POSTGRES_CHECKPOINT_TIMEOUT=15min`
+- `PGBOUNCER_DEFAULT_POOL_SIZE=100`
+- `REGISTRATION_BATCH_SIZE=100`
+- `REGISTRATION_BATCH_WAIT=10ms`
+- worker isolation remains enabled (`WORKER_DB_POOL_MAX_CONNS=4`, `WORKER_GOMAXPROCS=1`, `WORKER_GOMEMLIMIT=256MiB`)
 
 ## 📈 Performance (Local Benchmarks)
 
@@ -66,8 +81,9 @@ Recent measured results on local Docker Compose runs:
 | Before the hot-path fixes (worker contending with API) | ~3,875.8/s | n/a | n/a |
 | Clean-slate optimized stack | **34,023.7/s** | **14.56ms** | **21.89ms** |
 | After dropping DB-level `username` uniqueness | **34,557.6/s** | **14.32ms** | **20.67ms** |
-| After `CopyFrom(users)` plus tuned API DB pool (`pool_max_conns=128`) | **41,227.2/s** | **11.87ms** | **22.41ms** |
+| Best measured sweep peak after `CopyFrom(users)` plus tuned API DB pool (`pool_max_conns=128`) | **41,227.2/s** | **11.87ms** | **22.41ms** |
 | After reducing Postgres `max_connections` to `256` (with API pool `128`) | **35,156.0/s** | **14.05ms** | **20.53ms** |
+| Current tuned defaults, confirmatory `full` run | **34,744.1/s** | **14.21ms** | **21.57ms** |
 | Same setup under eBPF profiling | **31,975.0/s** | **15.38ms** | **24.75ms** |
 
 Notes:
@@ -75,6 +91,7 @@ Notes:
 - Current tuned default for the API path is `APP_DB_POOL_MAX_CONNS=128`; larger defaults like `500` reduced throughput noticeably in the tuning sweep.
 - A later confirmatory A/B still kept `128` ahead of `500` (`35,885.0/s` vs `33,456.5/s`), even though absolute numbers varied between runs.
 - Current tuned Postgres default is `POSTGRES_MAX_CONNECTIONS=256`; in isolated A/B it beat the previous `1000` setting (`35,156.0/s` vs `34,339.9/s`).
+- Additional `shared_buffers` / `checkpoint_timeout` experiments did **not** beat the current baseline, so defaults remain `512MB` and `15min`.
 - `email` remains unique and is used for login lookup.
 - `username` is **currently not unique at the DB level**; removing `users_username_key` reduced write cost on the registration path.
 
