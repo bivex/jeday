@@ -2,30 +2,15 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jeday/auth/internal/db"
 )
-
-const createUsersBulk = `
-WITH input AS (
-	SELECT email, username, ord::int
-	FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS t(email, username, ord)
-), inserted AS (
-	INSERT INTO users (email, username)
-	SELECT email, username
-	FROM input
-	ORDER BY ord
-	RETURNING id, email, username, status, created_at, updated_at
-)
-SELECT inserted.id, inserted.email, inserted.username, inserted.status, inserted.created_at, inserted.updated_at, input.ord
-FROM inserted
-JOIN input
-	ON inserted.email = input.email AND inserted.username = input.username
-ORDER BY input.ord
-`
 
 // Repository defines all functions to execute db queries and transactions
 type Repository interface {
@@ -82,34 +67,22 @@ func (r *PostgresRepository) CreateUsersBatch(ctx context.Context, users []db.Cr
 	}
 	defer tx.Rollback(ctx)
 
-	emails, usernames := splitBatchUsers(users)
-	rows, err := tx.Query(ctx, createUsersBulk, emails, usernames)
+	createdUsers, err := buildUsersForCopy(users, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	createdUsers := make([]db.User, len(users))
-	createdCount := 0
-	for rows.Next() {
-		var user db.User
-		var ord int
-		if err := rows.Scan(&user.ID, &user.Email, &user.Username, &user.Status, &user.CreatedAt, &user.UpdatedAt, &ord); err != nil {
-			return nil, err
-		}
-
-		if ord < 1 || ord > len(users) {
-			return nil, fmt.Errorf("bulk insert returned invalid ordinality %d", ord)
-		}
-
-		createdUsers[ord-1] = user
-		createdCount++
-	}
-	if err := rows.Err(); err != nil {
+	insertedUsers, err := tx.CopyFrom(
+		ctx,
+		pgx.Identifier{"users"},
+		[]string{"id", "email", "username", "status", "created_at", "updated_at"},
+		pgx.CopyFromRows(buildUserRows(createdUsers)),
+	)
+	if err != nil {
 		return nil, err
 	}
-	if createdCount != len(users) {
-		return nil, fmt.Errorf("bulk insert created %d users, expected %d", createdCount, len(users))
+	if insertedUsers != int64(len(createdUsers)) {
+		return nil, fmt.Errorf("bulk insert created %d users, expected %d", insertedUsers, len(createdUsers))
 	}
 
 	enqueuedPasswords, err := tx.CopyFrom(
@@ -133,15 +106,43 @@ func (r *PostgresRepository) CreateUsersBatch(ctx context.Context, users []db.Cr
 	return createdUsers, nil
 }
 
-func splitBatchUsers(users []db.CreateUserParams) ([]string, []string) {
-	emails := make([]string, len(users))
-	usernames := make([]string, len(users))
+func buildUsersForCopy(users []db.CreateUserParams, now time.Time) ([]db.User, error) {
+	createdUsers := make([]db.User, len(users))
+	createdAt := pgtype.Timestamptz{Time: now, Valid: true}
+
 	for i, user := range users {
-		emails[i] = user.Email
-		usernames[i] = user.Username
+		id, err := newUUIDv4()
+		if err != nil {
+			return nil, err
+		}
+
+		createdUsers[i] = db.User{
+			ID:        id,
+			Email:     user.Email,
+			Username:  user.Username,
+			Status:    "pending",
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		}
 	}
 
-	return emails, usernames
+	return createdUsers, nil
+}
+
+func buildUserRows(users []db.User) [][]any {
+	rows := make([][]any, len(users))
+	for i := range users {
+		rows[i] = []any{
+			users[i].ID,
+			users[i].Email,
+			users[i].Username,
+			users[i].Status,
+			users[i].CreatedAt,
+			users[i].UpdatedAt,
+		}
+	}
+
+	return rows
 }
 
 func buildPasswordUpgradeQueueRows(users []db.User, passwords []string) [][]any {
@@ -154,4 +155,15 @@ func buildPasswordUpgradeQueueRows(users []db.User, passwords []string) [][]any 
 	}
 
 	return rows
+}
+
+func newUUIDv4() (pgtype.UUID, error) {
+	var uuid pgtype.UUID
+	if _, err := rand.Read(uuid.Bytes[:]); err != nil {
+		return pgtype.UUID{}, err
+	}
+	uuid.Bytes[6] = (uuid.Bytes[6] & 0x0f) | 0x40
+	uuid.Bytes[8] = (uuid.Bytes[8] & 0x3f) | 0x80
+	uuid.Valid = true
+	return uuid, nil
 }
