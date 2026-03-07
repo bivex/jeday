@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jeday/auth/internal/db"
 )
@@ -133,6 +132,7 @@ func (r *PostgresRepository) CreateUsersBatch(ctx context.Context, users []db.Cr
 
 	return createdUsers, nil
 }
+
 func splitBatchUsers(users []db.CreateUserParams) ([]string, []string) {
 	emails := make([]string, len(users))
 	usernames := make([]string, len(users))

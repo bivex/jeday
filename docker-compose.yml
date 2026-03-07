@@ -111,6 +111,7 @@ services:
 
   k6:
     image: grafana/k6
+    profiles: ["loadtest"]
     volumes:
       - ./load-test-reg-only.js:/load-test.js
     command: run /load-test.js --vus 500 --duration 60s

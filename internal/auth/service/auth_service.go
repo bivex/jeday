@@ -257,7 +257,7 @@ func (s *authService) UpgradePasswords(ctx context.Context, limit int32) (int, e
 		// In production, you would typically wait for the next LOGIN to upgrade,
 		// but since you asked for a "different container", we'll do what we can.
 
-		strongHash, err := token.HashPassword(pwd.WeakPasswordHash.String)
+		strongHash, err := token.HashPassword(pwd.WeakPasswordHash)
 		if err != nil {
 			continue
 		}
