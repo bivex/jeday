@@ -67,12 +67,14 @@ Recent measured results on local Docker Compose runs:
 | Clean-slate optimized stack | **34,023.7/s** | **14.56ms** | **21.89ms** |
 | After dropping DB-level `username` uniqueness | **34,557.6/s** | **14.32ms** | **20.67ms** |
 | After `CopyFrom(users)` plus tuned API DB pool (`pool_max_conns=128`) | **41,227.2/s** | **11.87ms** | **22.41ms** |
+| After reducing Postgres `max_connections` to `256` (with API pool `128`) | **35,156.0/s** | **14.05ms** | **20.53ms** |
 | Same setup under eBPF profiling | **31,975.0/s** | **15.38ms** | **24.75ms** |
 
 Notes:
 - Numbers above are from registration-only `k6` runs (`500 VUs`, `20s`) against the local Docker Compose stack.
 - Current tuned default for the API path is `APP_DB_POOL_MAX_CONNS=128`; larger defaults like `500` reduced throughput noticeably in the tuning sweep.
 - A later confirmatory A/B still kept `128` ahead of `500` (`35,885.0/s` vs `33,456.5/s`), even though absolute numbers varied between runs.
+- Current tuned Postgres default is `POSTGRES_MAX_CONNECTIONS=256`; in isolated A/B it beat the previous `1000` setting (`35,156.0/s` vs `34,339.9/s`).
 - `email` remains unique and is used for login lookup.
 - `username` is **currently not unique at the DB level**; removing `users_username_key` reduced write cost on the registration path.
 

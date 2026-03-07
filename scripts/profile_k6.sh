@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+PGBOUNCER_INI="$ROOT_DIR/pgbouncer.ini"
+PGBOUNCER_INI_BACKUP=""
+
 COMMAND="${1:-full}"
 VUS="${VUS:-500}"
 DURATION="${DURATION:-20s}"
@@ -38,6 +41,35 @@ require_cmd() {
     echo "error: required command not found: $1" >&2
     exit 1
   }
+}
+
+prepare_pgbouncer_ini() {
+  PGBOUNCER_INI_BACKUP="$(mktemp "${TMPDIR:-/tmp}/jeday-pgbouncer.ini.XXXXXX")"
+  cp "$PGBOUNCER_INI" "$PGBOUNCER_INI_BACKUP"
+
+  cat > "$PGBOUNCER_INI" <<EOF
+[pgbouncer]
+listen_port = ${PGBOUNCER_PORT:-6432}
+listen_addr = 0.0.0.0
+auth_type = md5
+auth_file = /etc/pgbouncer/userlist.txt
+pool_mode = ${PGBOUNCER_POOL_MODE:-transaction}
+max_client_conn = ${PGBOUNCER_MAX_CLIENT_CONN:-10000}
+default_pool_size = ${PGBOUNCER_DEFAULT_POOL_SIZE:-100}
+min_pool_size = ${PGBOUNCER_MIN_POOL_SIZE:-0}
+reserve_pool_size = ${PGBOUNCER_RESERVE_POOL_SIZE:-0}
+ignore_startup_parameters = ${PGBOUNCER_IGNORE_STARTUP_PARAMETERS:-extra_float_digits,prefer_simple_protocol}
+
+[databases]
+auth_db = host=db port=5432 dbname=auth_db
+EOF
+}
+
+restore_pgbouncer_ini() {
+  if [[ -n "$PGBOUNCER_INI_BACKUP" && -f "$PGBOUNCER_INI_BACKUP" ]]; then
+    mv "$PGBOUNCER_INI_BACKUP" "$PGBOUNCER_INI"
+    PGBOUNCER_INI_BACKUP=""
+  fi
 }
 
 cleanup_stack() {
@@ -93,6 +125,18 @@ WORKER_GOMAXPROCS=${WORKER_GOMAXPROCS:-1}
 WORKER_GOMEMLIMIT=${WORKER_GOMEMLIMIT:-256MiB}
 WORKER_INTERVAL=${WORKER_INTERVAL:-5s}
 WORKER_UPGRADE_LIMIT=${WORKER_UPGRADE_LIMIT:-4}
+PGBOUNCER_PORT=${PGBOUNCER_PORT:-6432}
+PGBOUNCER_POOL_MODE=${PGBOUNCER_POOL_MODE:-transaction}
+PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN:-10000}
+PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE:-100}
+PGBOUNCER_MIN_POOL_SIZE=${PGBOUNCER_MIN_POOL_SIZE:-0}
+PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE:-0}
+PGBOUNCER_IGNORE_STARTUP_PARAMETERS=${PGBOUNCER_IGNORE_STARTUP_PARAMETERS:-extra_float_digits,prefer_simple_protocol}
+POSTGRES_MAX_CONNECTIONS=${POSTGRES_MAX_CONNECTIONS:-256}
+POSTGRES_SHARED_BUFFERS=${POSTGRES_SHARED_BUFFERS:-512MB}
+POSTGRES_SYNCHRONOUS_COMMIT=${POSTGRES_SYNCHRONOUS_COMMIT:-off}
+POSTGRES_FULL_PAGE_WRITES=${POSTGRES_FULL_PAGE_WRITES:-off}
+POSTGRES_CHECKPOINT_TIMEOUT=${POSTGRES_CHECKPOINT_TIMEOUT:-15min}
 VUS=$VUS
 DURATION=$DURATION
 LOAD_SCRIPT=$LOAD_SCRIPT
@@ -103,6 +147,7 @@ run_profile() {
   mkdir -p "$RUN_DIR"
 
   echo "==> Starting app stack"
+  prepare_pgbouncer_ini
   write_tuning_snapshot
   compose up --build -d
   wait_for_health
@@ -139,6 +184,8 @@ run_profile() {
 }
 
 main() {
+  trap restore_pgbouncer_ini EXIT
+
   require_cmd docker
   require_cmd curl
   require_cmd grep

@@ -38,13 +38,13 @@ services:
     image: edoburu/pgbouncer:latest
     environment:
       - DATABASE_URL=postgresql://app_user:secret@db:5432/auth_db?sslmode=disable
-      - PGBOUNCER_PORT=6432
-      - PGBOUNCER_POOL_MODE=transaction
-      - PGBOUNCER_MAX_CLIENT_CONN=10000
-      - PGBOUNCER_DEFAULT_POOL_SIZE=300
-      - PGBOUNCER_MIN_POOL_SIZE=100
-      - PGBOUNCER_RESERVE_POOL_SIZE=50
-      - PGBOUNCER_IGNORE_STARTUP_PARAMETERS=extra_float_digits,prefer_simple_protocol
+      - PGBOUNCER_PORT=${PGBOUNCER_PORT:-6432}
+      - PGBOUNCER_POOL_MODE=${PGBOUNCER_POOL_MODE:-transaction}
+      - PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN:-10000}
+      - PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE:-100}
+      - PGBOUNCER_MIN_POOL_SIZE=${PGBOUNCER_MIN_POOL_SIZE:-0}
+      - PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE:-0}
+      - PGBOUNCER_IGNORE_STARTUP_PARAMETERS=${PGBOUNCER_IGNORE_STARTUP_PARAMETERS:-extra_float_digits,prefer_simple_protocol}
     volumes:
       - ./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini
       - ./userlist.txt:/etc/pgbouncer/userlist.txt
@@ -56,7 +56,7 @@ services:
 
   db:
     image: postgres:16-alpine
-    command: ["postgres", "-c", "max_connections=1000", "-c", "shared_buffers=512MB", "-c", "synchronous_commit=off", "-c", "full_page_writes=off", "-c", "checkpoint_timeout=15min"]
+    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-256}", "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}", "-c", "synchronous_commit=${POSTGRES_SYNCHRONOUS_COMMIT:-off}", "-c", "full_page_writes=${POSTGRES_FULL_PAGE_WRITES:-off}", "-c", "checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-15min}"]
     environment:
       POSTGRES_USER: app_user
       POSTGRES_PASSWORD: secret
