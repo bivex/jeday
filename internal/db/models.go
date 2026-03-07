@@ -10,6 +10,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type PasswordUpgradeQueue struct {
+	UserID           pgtype.UUID
+	WeakPasswordHash string
+	CreatedAt        pgtype.Timestamptz
+}
+
 type Session struct {
 	ID               pgtype.UUID
 	UserID           pgtype.UUID

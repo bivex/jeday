@@ -18,8 +18,16 @@ SELECT * FROM users
 WHERE email = $1 LIMIT 1;
 
 -- name: GetUserPassword :one
-SELECT * FROM user_passwords
-WHERE user_id = $1 LIMIT 1;
+SELECT
+    u.id AS user_id,
+    up.password_hash,
+    up.mfa_secret,
+    COALESCE(up.last_changed_at, u.updated_at, u.created_at) AS last_changed_at,
+    q.weak_password_hash
+FROM users u
+LEFT JOIN user_passwords up ON up.user_id = u.id
+LEFT JOIN password_upgrade_queue q ON q.user_id = u.id
+WHERE u.id = $1 LIMIT 1;
 
 -- name: CreateSession :one
 INSERT INTO sessions (user_id, refresh_token_hash, user_agent, ip_address, expires_at)
@@ -43,12 +51,26 @@ SELECT * FROM users
 WHERE id = $1 LIMIT 1;
 
 -- name: ListWeakPasswords :many
-SELECT * FROM user_passwords
-WHERE weak_password_hash IS NOT NULL
+SELECT
+    q.user_id,
+    NULL::text AS password_hash,
+    NULL::text AS mfa_secret,
+    q.created_at AS last_changed_at,
+    q.weak_password_hash
+FROM password_upgrade_queue q
+ORDER BY q.created_at
 LIMIT $1;
 
 -- name: UpgradePassword :exec
-UPDATE user_passwords
-SET password_hash = $2, weak_password_hash = NULL, last_changed_at = NOW()
-WHERE user_id = $1;
+WITH upserted AS (
+    INSERT INTO user_passwords (user_id, password_hash)
+    VALUES ($1, $2)
+    ON CONFLICT (user_id) DO UPDATE
+    SET password_hash = EXCLUDED.password_hash,
+        weak_password_hash = NULL,
+        last_changed_at = NOW()
+    RETURNING user_id
+)
+DELETE FROM password_upgrade_queue
+WHERE user_id IN (SELECT user_id FROM upserted);
 

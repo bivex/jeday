@@ -23,14 +23,14 @@ func TestSplitBatchUsersPreservesOrder(t *testing.T) {
 	}
 }
 
-func TestBuildWeakPasswordRowsPreservesUserPasswordPairs(t *testing.T) {
+func TestBuildPasswordUpgradeQueueRowsPreservesUserPasswordPairs(t *testing.T) {
 	users := []db.User{
 		{ID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}},
 		{ID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true}},
 	}
 	passwords := []string{"hash-1", "hash-2"}
 
-	rows := buildWeakPasswordRows(users, passwords)
+	rows := buildPasswordUpgradeQueueRows(users, passwords)
 
 	if len(rows) != 2 {
 		t.Fatalf("len(rows) = %d, want 2", len(rows))
@@ -38,7 +38,7 @@ func TestBuildWeakPasswordRowsPreservesUserPasswordPairs(t *testing.T) {
 	if got := rows[0][0].(pgtype.UUID); got != users[0].ID {
 		t.Fatalf("rows[0][0] = %v, want %v", got, users[0].ID)
 	}
-	if got := rows[1][1].(pgtype.Text); got.String != "hash-2" || !got.Valid {
-		t.Fatalf("rows[1][1] = %#v, want valid hash-2", got)
+	if got := rows[1][1].(string); got != "hash-2" {
+		t.Fatalf("rows[1][1] = %q, want hash-2", got)
 	}
 }

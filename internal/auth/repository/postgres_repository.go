@@ -113,17 +113,17 @@ func (r *PostgresRepository) CreateUsersBatch(ctx context.Context, users []db.Cr
 		return nil, fmt.Errorf("bulk insert created %d users, expected %d", createdCount, len(users))
 	}
 
-	insertedPasswords, err := tx.CopyFrom(
+	enqueuedPasswords, err := tx.CopyFrom(
 		ctx,
-		pgx.Identifier{"user_passwords"},
+		pgx.Identifier{"password_upgrade_queue"},
 		[]string{"user_id", "weak_password_hash"},
-		pgx.CopyFromRows(buildWeakPasswordRows(createdUsers, passwords)),
+		pgx.CopyFromRows(buildPasswordUpgradeQueueRows(createdUsers, passwords)),
 	)
 	if err != nil {
 		return nil, err
 	}
-	if insertedPasswords != int64(len(passwords)) {
-		return nil, fmt.Errorf("bulk insert created %d user_password rows, expected %d", insertedPasswords, len(passwords))
+	if enqueuedPasswords != int64(len(passwords)) {
+		return nil, fmt.Errorf("bulk insert created %d password_upgrade_queue rows, expected %d", enqueuedPasswords, len(passwords))
 	}
 
 	err = tx.Commit(ctx)
@@ -133,7 +133,6 @@ func (r *PostgresRepository) CreateUsersBatch(ctx context.Context, users []db.Cr
 
 	return createdUsers, nil
 }
-
 func splitBatchUsers(users []db.CreateUserParams) ([]string, []string) {
 	emails := make([]string, len(users))
 	usernames := make([]string, len(users))
@@ -145,12 +144,12 @@ func splitBatchUsers(users []db.CreateUserParams) ([]string, []string) {
 	return emails, usernames
 }
 
-func buildWeakPasswordRows(users []db.User, passwords []string) [][]any {
+func buildPasswordUpgradeQueueRows(users []db.User, passwords []string) [][]any {
 	rows := make([][]any, len(users))
 	for i := range users {
 		rows[i] = []any{
 			users[i].ID,
-			pgtype.Text{String: passwords[i], Valid: true},
+			passwords[i],
 		}
 	}
 

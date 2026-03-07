@@ -212,13 +212,29 @@ func (q *Queries) GetUserById(ctx context.Context, id pgtype.UUID) (User, error)
 }
 
 const getUserPassword = `-- name: GetUserPassword :one
-SELECT user_id, password_hash, mfa_secret, last_changed_at, weak_password_hash FROM user_passwords
-WHERE user_id = $1 LIMIT 1
+SELECT
+    u.id AS user_id,
+    up.password_hash,
+    up.mfa_secret,
+    COALESCE(up.last_changed_at, u.updated_at, u.created_at) AS last_changed_at,
+    q.weak_password_hash
+FROM users u
+LEFT JOIN user_passwords up ON up.user_id = u.id
+LEFT JOIN password_upgrade_queue q ON q.user_id = u.id
+WHERE u.id = $1 LIMIT 1
 `
 
-func (q *Queries) GetUserPassword(ctx context.Context, userID pgtype.UUID) (UserPassword, error) {
-	row := q.db.QueryRow(ctx, getUserPassword, userID)
-	var i UserPassword
+type GetUserPasswordRow struct {
+	UserID           pgtype.UUID
+	PasswordHash     pgtype.Text
+	MfaSecret        pgtype.Text
+	LastChangedAt    pgtype.Timestamptz
+	WeakPasswordHash pgtype.Text
+}
+
+func (q *Queries) GetUserPassword(ctx context.Context, id pgtype.UUID) (GetUserPasswordRow, error) {
+	row := q.db.QueryRow(ctx, getUserPassword, id)
+	var i GetUserPasswordRow
 	err := row.Scan(
 		&i.UserID,
 		&i.PasswordHash,
@@ -230,20 +246,34 @@ func (q *Queries) GetUserPassword(ctx context.Context, userID pgtype.UUID) (User
 }
 
 const listWeakPasswords = `-- name: ListWeakPasswords :many
-SELECT user_id, password_hash, mfa_secret, last_changed_at, weak_password_hash FROM user_passwords
-WHERE weak_password_hash IS NOT NULL
+SELECT
+    q.user_id,
+    NULL::text AS password_hash,
+    NULL::text AS mfa_secret,
+    q.created_at AS last_changed_at,
+    q.weak_password_hash
+FROM password_upgrade_queue q
+ORDER BY q.created_at
 LIMIT $1
 `
 
-func (q *Queries) ListWeakPasswords(ctx context.Context, limit int32) ([]UserPassword, error) {
+type ListWeakPasswordsRow struct {
+	UserID           pgtype.UUID
+	PasswordHash     pgtype.Text
+	MfaSecret        pgtype.Text
+	LastChangedAt    pgtype.Timestamptz
+	WeakPasswordHash string
+}
+
+func (q *Queries) ListWeakPasswords(ctx context.Context, limit int32) ([]ListWeakPasswordsRow, error) {
 	rows, err := q.db.Query(ctx, listWeakPasswords, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []UserPassword
+	var items []ListWeakPasswordsRow
 	for rows.Next() {
-		var i UserPassword
+		var i ListWeakPasswordsRow
 		if err := rows.Scan(
 			&i.UserID,
 			&i.PasswordHash,
@@ -262,9 +292,17 @@ func (q *Queries) ListWeakPasswords(ctx context.Context, limit int32) ([]UserPas
 }
 
 const upgradePassword = `-- name: UpgradePassword :exec
-UPDATE user_passwords
-SET password_hash = $2, weak_password_hash = NULL, last_changed_at = NOW()
-WHERE user_id = $1
+WITH upserted AS (
+    INSERT INTO user_passwords (user_id, password_hash)
+    VALUES ($1, $2)
+    ON CONFLICT (user_id) DO UPDATE
+    SET password_hash = EXCLUDED.password_hash,
+        weak_password_hash = NULL,
+        last_changed_at = NOW()
+    RETURNING user_id
+)
+DELETE FROM password_upgrade_queue
+WHERE user_id IN (SELECT user_id FROM upserted)
 `
 
 type UpgradePasswordParams struct {

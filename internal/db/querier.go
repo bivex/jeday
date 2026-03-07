@@ -20,8 +20,8 @@ type Querier interface {
 	GetSessionByRefreshToken(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserById(ctx context.Context, id pgtype.UUID) (User, error)
-	GetUserPassword(ctx context.Context, userID pgtype.UUID) (UserPassword, error)
-	ListWeakPasswords(ctx context.Context, limit int32) ([]UserPassword, error)
+	GetUserPassword(ctx context.Context, id pgtype.UUID) (GetUserPasswordRow, error)
+	ListWeakPasswords(ctx context.Context, limit int32) ([]ListWeakPasswordsRow, error)
 	UpgradePassword(ctx context.Context, arg UpgradePasswordParams) error
 }
 
